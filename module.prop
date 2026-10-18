@@ -1,0 +1,6 @@
+id=no_sim_adb_unlock
+name=No-SIM USB Debug & Install Unlock
+version=v1.0.0
+versionCode=1
+author=vip-svip
+description=无SIM卡时强制开启「USB调试」与「USB安装」(MIUI/HyperOS, 含USB调试安全设置/ADB模拟输入)。开机自动写入 adb_enabled=1 / persist.security.adbinstall=1 / persist.security.adbinput=1，并每30秒守护防止被系统自动关闭。兼容 Magisk / KernelSU / APatch。
