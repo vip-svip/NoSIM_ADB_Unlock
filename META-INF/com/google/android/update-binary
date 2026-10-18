@@ -1,0 +1,53 @@
+#!/sbin/sh
+# =============================================================
+#  通用模块安装器
+#  - 有 Magisk 时: 走官方 util_functions.sh 流程
+#  - 无 Magisk (KernelSU/APatch 等直接执行本脚本时): 内建最小安装
+# =============================================================
+umask 022
+
+ui_print() { echo "$1"; }
+
+OUTFD="$2"
+ZIPFILE="$3"
+MODID=no_sim_adb_unlock
+
+mount /data 2>/dev/null
+
+if [ -f /data/adb/magisk/util_functions.sh ]; then
+    # ---------- Magisk 官方流程 ----------
+    . /data/adb/magisk/util_functions.sh
+    if [ -z "$MAGISK_VER_CODE" ] || [ "$MAGISK_VER_CODE" -lt 20400 ]; then
+        ui_print "******************************"
+        ui_print " 请升级到 Magisk v20.4+ 后重试 "
+        ui_print "******************************"
+        exit 1
+    fi
+    install_module
+    exit 0
+fi
+
+# ---------- 通用最小安装 ----------
+ui_print "- 未检测到 Magisk util_functions, 使用通用兼容安装"
+DEST=/data/adb/modules_update/$MODID
+rm -rf "$DEST"
+mkdir -p "$DEST" || { ui_print "! 无法创建 $DEST"; exit 1; }
+
+if command -v unzip >/dev/null 2>&1; then
+    ( cd "$DEST" && unzip -o "$ZIPFILE" >/dev/null 2>&1 )
+elif [ -x /data/adb/ksu/bin/busybox ]; then
+    ( cd "$DEST" && /data/adb/ksu/bin/busybox unzip -o "$ZIPFILE" >/dev/null 2>&1 )
+elif [ -x /data/adb/ap/bin/busybox ]; then
+    ( cd "$DEST" && /data/adb/ap/bin/busybox unzip -o "$ZIPFILE" >/dev/null 2>&1 )
+else
+    ui_print "! 找不到可用的 unzip, 安装失败"
+    exit 1
+fi
+
+rm -rf "$DEST/META-INF"
+chmod 0755 "$DEST/service.sh" "$DEST/action.sh" "$DEST/uninstall.sh" 2>/dev/null
+[ -f "$DEST/module.prop" ] || { ui_print "! 压缩包缺少 module.prop"; exit 1; }
+touch "$DEST/update"
+
+ui_print "- 安装完成, 重启后生效"
+exit 0
