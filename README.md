@@ -9,34 +9,43 @@
 
 - 手机已解锁 BL 并已装好 Magisk / KernelSU / APatch（模块必须依赖 root 才能安装）。
 
-## 原理
+## 原理（v2，实测逆向 MIUI 14）
 
-设置 App 打开这两个开关前会做 SIM 卡 / 账号校验，但校验只是 UI 层拦截，
-真正的开关在系统底层。本模块在每次开机后以 root 直接写入底层开关：
+**USB调试**是 Android 原生开关：`settings put global adb_enabled 1`。
 
-| 开关 | 底层值 |
+**USB安装**的界面开关状态存在 SecurityCenter 的
+`/data/data/com.miui.securitycenter/shared_prefs/remote_provider_preferences.xml`
+里，key 为 `security_adb_install_enable`。设置 App 通过
+`content://com.miui.securitycenter.remoteprovider`（method `callPreference`）读写它；
+该 provider 对 SET 有**调用者白名单 + SIM 卡校验**（无 SIM 卡时弹"请先插入SIM卡"并写回 false）。
+
+模块的做法：杀掉 SecurityCenter 进程后直接把 XML 里的值改为 `true`
+（属主 system:system、权限 660、SELinux restorecon），系统自动拉起进程后即读到开。
+开关显示开启后，`adb install` 实测免手机端确认（MIUI 14 国行验证通过）。
+
+| 开关 | 机制 |
 |---|---|
-| USB调试（Android 原生） | `settings put global adb_enabled 1` |
-| USB安装（MIUI/HyperOS） | `persist.security.adbinstall=1` |
-| USB调试(安全设置)/adb模拟输入（MIUI） | `persist.security.adbinput=1` |
-| adb 安装免“验证应用” | `settings put global verifier_verify_adb_installs 0` |
+| USB调试（原生） | `settings put global adb_enabled 1` |
+| USB安装（MIUI） | SecurityCenter SP `security_adb_install_enable=true` + `persist.security.adbinstall=1` |
+| USB调试(安全设置)/adb模拟输入 | `persist.security.adbinput=1` |
+| adb 安装免"验证应用" | `settings put global verifier_verify_adb_installs 0` |
 
 并附带 30 秒一次的守护：如果系统把这些开关自动关回去，会立即重新打开。
 
 ## 安装
 
-1. 把 `NoSIM_ADB_Unlock_v1.0.0.zip` 传到手机。
+1. 把 `NoSIM_ADB_Unlock_v2.0.0.zip` 传到手机。
 2. Magisk：模块 → 从本地安装 → 选择 zip → 重启。
    KernelSU / APatch：模块 → 从存储安装 → 选择 zip → 重启。
-3. 重启后生效（开机后约 10~20 秒完成应用）。
+3. 重启后生效（开机后约 30 秒完成应用，含 SecurityCenter 重启一次）。
 
 ## 验证
 
-- 开发者选项里「USB调试」会直接显示已开启（即使没有 SIM 卡）。
+- 开发者选项里「USB调试」「USB安装」直接显示已开启（即使没有 SIM 卡）。
 - 插电脑执行 `adb devices`，手机弹出授权对话框选“始终允许”。
-- `adb install xxx.apk` 不再需要手机端确认。
-- **注意**：MIUI 的「USB安装」开关在界面上可能仍显示灰色/关闭——忽略它，
-  以实际 `adb install` 是否免确认为准。
+- `adb install xxx.apk` 不再需要手机端确认（实测通过）。
+- **注意**：若「USB安装」开关显示开启后你手动点击它关闭，守护会在 30 秒内
+  重新开启（想手动控制请停用模块）。
 - 运行日志：`/data/adb/modules/no_sim_adb_unlock/service.log`。
 
 ## 管理器里的 [执行](Action) 按钮
@@ -64,17 +73,30 @@ settings put global adb_enabled 0
 settings put global verifier_verify_adb_installs 1
 setprop persist.security.adbinstall 0
 setprop persist.security.adbinput 0
+# USB安装界面开关还原为关:
+kill -9 $(ps -A -o PID,NAME | grep securitycenter | grep -v grep | awk '{print $1}')
+sed -i 's|name="security_adb_install_enable" value="true"|name="security_adb_install_enable" value="false"|' \
+  /data/data/com.miui.securitycenter/shared_prefs/remote_provider_preferences.xml
 ```
 
-## 手动等效命令（不装模块，在已 root 终端执行一次同样有效）
+## 手动等效命令（不装模块，在已 root 终端执行同样有效）
 
 ```
 su
+# USB调试 + 属性
 settings put global adb_enabled 1
 setprop persist.security.adbinstall 1
 setprop persist.security.adbinput 1
 settings put global verifier_verify_adb_installs 0
+# USB安装界面开关 (MIUI): 杀 SecurityCenter 后改 XML
+kill -9 $(ps -A -o PID,NAME | grep securitycenter | grep -v grep | awk '{print $1}')
+sed -i 's|name="security_adb_install_enable" value="false"|name="security_adb_install_enable" value="true"|' \
+  /data/data/com.miui.securitycenter/shared_prefs/remote_provider_preferences.xml
+chown 1000:1000 /data/data/com.miui.securitycenter/shared_prefs/remote_provider_preferences.xml
+chmod 660 /data/data/com.miui.securitycenter/shared_prefs/remote_provider_preferences.xml
 ```
+
+（系统会自动重新拉起 SecurityCenter 并读到新值。）
 
 ## 兼容性
 
